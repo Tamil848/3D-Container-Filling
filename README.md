@@ -74,7 +74,7 @@ You can upload these values via:
 ### 🔧 Run Locally
 
 ```bash
-git clone https://github.com/yourusername/3d-container-filling-app.git
+git clone https://github.com/Tamil848/3D-Container-Filling.git
 cd 3d-container-filling-app
 
 # If using Node.js + Three.js
