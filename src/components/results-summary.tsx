@@ -9,6 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { AlertCircle, CheckCircle, Info, Package, Percent, ThumbsUp, XCircle } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "./ui/alert";
+import { cn } from "@/lib/utils";
 
 interface ResultsSummaryProps {
   results: OptimizePackingOutput;
