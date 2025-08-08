@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useRef, useEffect, useMemo, useState } from 'react';
+import React, { useRef, useEffect, useMemo } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import type { OptimizePackingOutput } from '@/ai/flows/optimize-packing-configuration';
@@ -22,41 +22,54 @@ export function Visualization3D({ results, containerDimensions, packages }: Visu
   const mountRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
+  const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
-  const [isInitialized, setIsInitialized] = useState(false);
+  const animationFrameId = useRef<number | null>(null);
 
   const containerSize = useMemo(() => {
     return new THREE.Vector3(containerDimensions.length || 200, containerDimensions.height || 200, containerDimensions.width || 200);
   }, [containerDimensions]);
 
   useEffect(() => {
-    if (!mountRef.current || isInitialized) return;
-
     const currentMount = mountRef.current;
+    if (!currentMount) return;
 
+    // --- Initialize scene, camera, renderer, and controls ---
     sceneRef.current = new THREE.Scene();
     const scene = sceneRef.current;
-    scene.background = new THREE.Color(0xf0f5f7); // Corresponds to --background HSL
-
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(currentMount.clientWidth, currentMount.clientHeight);
-    renderer.setPixelRatio(window.devicePixelRatio);
-    currentMount.appendChild(renderer.domElement);
+    scene.background = new THREE.Color(0xf0f5f7);
 
     cameraRef.current = new THREE.PerspectiveCamera(50, currentMount.clientWidth / currentMount.clientHeight, 0.1, 10000);
     const camera = cameraRef.current;
 
+    rendererRef.current = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    const renderer = rendererRef.current;
+    renderer.setSize(currentMount.clientWidth, currentMount.clientHeight);
+    renderer.setPixelRatio(window.devicePixelRatio);
+    currentMount.appendChild(renderer.domElement);
+    
     controlsRef.current = new OrbitControls(camera, renderer.domElement);
     const controls = controlsRef.current;
+    controls.enableDamping = true;
 
+    // --- Lighting ---
     const ambientLight = new THREE.AmbientLight(0xffffff, 1.5);
     scene.add(ambientLight);
     const directionalLight = new THREE.DirectionalLight(0xffffff, 1.5);
     directionalLight.position.set(1, 1, 1).normalize();
     scene.add(directionalLight);
 
+    // --- Animation loop ---
+    const animate = () => {
+      animationFrameId.current = requestAnimationFrame(animate);
+      controls.update();
+      renderer.render(scene, camera);
+    };
+    animate();
+
+    // --- Resize handler ---
     const handleResize = () => {
-      if (!mountRef.current) return;
+      if (!mountRef.current || !rendererRef.current || !cameraRef.current) return;
       const width = mountRef.current.clientWidth;
       const height = mountRef.current.clientHeight;
       camera.aspect = width / height;
@@ -65,30 +78,30 @@ export function Visualization3D({ results, containerDimensions, packages }: Visu
     };
     window.addEventListener('resize', handleResize);
 
-    const animate = () => {
-      requestAnimationFrame(animate);
-      controls.update();
-      renderer.render(scene, camera);
-    };
-    animate();
-    
-    setIsInitialized(true);
-
+    // --- Cleanup ---
     return () => {
       window.removeEventListener('resize', handleResize);
-      renderer.dispose();
+      if (animationFrameId.current) {
+        cancelAnimationFrame(animationFrameId.current);
+      }
       controls.dispose();
-      if(currentMount) {
+      renderer.dispose();
+      if (currentMount) {
         currentMount.innerHTML = '';
       }
+      sceneRef.current = null;
+      cameraRef.current = null;
+      rendererRef.current = null;
+      controlsRef.current = null;
     };
-  }, [isInitialized]);
+  }, []);
 
   useEffect(() => {
-    if (!sceneRef.current || !cameraRef.current || !controlsRef.current) return;
     const scene = sceneRef.current;
     const camera = cameraRef.current;
     const controls = controlsRef.current;
+
+    if (!scene || !camera || !controls) return;
 
     // Clear previous objects
     const objectsToRemove = scene.children.filter(child => child.userData.isPackage || child.userData.isContainer);
@@ -107,15 +120,20 @@ export function Visualization3D({ results, containerDimensions, packages }: Visu
       results.packingConfigurations.forEach(config => {
         const originalPackage = packages[config.packageType];
         if (!originalPackage) return;
-        const originalDims = [originalPackage.length, originalPackage.width, originalPackage.height];
-
-        const orientedDims = {
-          length: originalDims[config.orientation[0]],
-          width: originalDims[config.orientation[1]],
-          height: originalDims[config.orientation[2]],
+        
+        const packageDims = {
+            length: originalPackage.length,
+            width: originalPackage.width,
+            height: originalPackage.height,
         };
 
-        const geometry = new THREE.BoxGeometry(orientedDims.length, orientedDims.height, orientedDims.width);
+        const orientedDims = {
+            x: packageDims[['length', 'width', 'height'][config.orientation[0]]],
+            y: packageDims[['length', 'width', 'height'][config.orientation[1]]],
+            z: packageDims[['length', 'width', 'height'][config.orientation[2]]],
+        };
+
+        const geometry = new THREE.BoxGeometry(orientedDims.x, orientedDims.z, orientedDims.y);
         const material = new THREE.MeshStandardMaterial({
           color: COLORS[config.packageType % COLORS.length],
           transparent: true,
@@ -125,9 +143,9 @@ export function Visualization3D({ results, containerDimensions, packages }: Visu
         });
         const cube = new THREE.Mesh(geometry, material);
         cube.position.set(
-          config.position[0] + orientedDims.length / 2,
-          config.position[2] + orientedDims.height / 2,
-          config.position[1] + orientedDims.width / 2
+          config.position[0] + orientedDims.x / 2,
+          config.position[2] + orientedDims.z / 2,
+          config.position[1] + orientedDims.y / 2
         );
         cube.userData.isPackage = true;
         scene.add(cube);
@@ -141,7 +159,7 @@ export function Visualization3D({ results, containerDimensions, packages }: Visu
     controls.target.set(containerSize.x / 2, containerSize.y / 2, containerSize.z / 2);
     controls.update();
 
-  }, [results, containerSize, packages, isInitialized]);
+  }, [results, containerSize, packages]);
 
   return (
     <Card className="h-full w-full flex flex-col">
